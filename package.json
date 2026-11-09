@@ -1,0 +1,21 @@
+{
+  "name": "pi-provider-throttle",
+  "version": "0.1.0",
+  "description": "Paces Pi provider requests to stay inside token-per-minute limits and back off cleanly on HTTP 429.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi", "rate-limit", "throttle", "baseten"],
+  "files": ["src", "README.md", "LICENSE"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
