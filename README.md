@@ -1,96 +1,127 @@
 # pi-provider-throttle
 
-A Pi extension that paces outbound model requests so a provider's rate limit stops turning into failures.
+A Pi plugin that slows down requests to your model provider so you stop getting `429` rate limit errors.
 
-Built for Baseten Model APIs, where a 200k token context and a fast agent loop will exhaust a token-per-minute quota in a few seconds and come back as `429 rate_limit_exceeded`.
+## The problem
 
-## The problem it solves
+Pi sends one request each turn. It retries when a request fails.
 
-Pi sends one request per turn and retries transient errors. With a large context, each request is expensive in tokens:
+Some providers limit how many tokens you can send each minute. If your context is large, one request can use a huge part of that limit.
 
-| Measure | Observed in a 281 request session |
+Here is what one long session looked like:
+
+| What we measured | Value |
 |---|---|
-| Median prompt size | ≈ 233,000 tokens |
-| Largest prompt | ≈ 327,000 tokens |
-| Median gap between request starts | ≈ 2.1 s |
-| Busiest minute | 27 requests |
-| Hard 429 failures | 56 |
+| Normal request size | about 233,000 tokens |
+| Largest request | about 327,000 tokens |
+| Normal gap between requests | about 2 seconds |
+| Most requests in one minute | 27 |
+| Requests that failed with `429` | 56 |
 
-At those sizes, a one-per-minute budget is realistic, and a two-second loop is not. The retries also add load at the worst moment.
+So Pi was sending very large requests very fast. The provider said no, over and over.
 
 ## What it does
 
-- Enforces a minimum gap between request starts for the chosen providers.
-- Keeps a 60 second sliding window of estimated prompt tokens and waits for room before starting.
-- On HTTP 429, holds every request until the cooldown expires. It uses `Retry-After` when the provider sends one and otherwise doubles its own backoff, up to a ceiling.
-- Stops idle prompt-cache warming for those providers. Warming resends the full context with no new output, so on a 200k token prompt it spends a whole request of quota for nothing.
-- Shows `pacing …` and `rate limited: holding …` in the status line while it waits.
+- It waits a minimum time between requests.
+- It counts the tokens it sent in the last minute. It waits if the next request would go over your limit.
+- When a `429` comes back, it stops sending for a while. It uses the wait time the provider asks for. If the provider gives none, it doubles its own wait time.
+- It turns off idle cache warming. That feature resends your whole context for no new answer, which wastes your limit.
+- It shows `pacing …` or `rate limited: holding …` while it waits.
 
-It never rewrites your payload. It only decides when the request leaves.
+It never changes your request. It only decides when the request leaves.
 
 ## Install
 
-From git:
+Use one command:
 
 ```bash
 pi install git:github.com/nerveband/pi-provider-throttle
 ```
 
-As an npm package after you publish one:
+Then start Pi, or run `/reload` in a running session.
+
+To install from a copy on your disk instead:
 
 ```bash
-pi install npm:pi-provider-throttle
+cp src/index.ts ~/.pi/agent/extensions/
 ```
 
-Or copy `src/index.ts` into `~/.pi/agent/extensions/` and run `/reload`.
+Do not do both. Two copies means two waits on every request.
 
-## Configuration
+## Set your limit
 
-All settings are environment variables, read when Pi starts.
+All settings are environment variables. Set them before you start Pi.
 
-| Variable | Default | Meaning |
+| Variable | Default | What it means |
 |---|---|---|
-| `PI_THROTTLE_PROVIDERS` | `baseten` | Comma separated provider ids to pace. `baseten` matches `models.json`. |
-| `PI_THROTTLE_MIN_INTERVAL_MS` | `3000` | Smallest gap between request starts. |
-| `PI_THROTTLE_TPM` | `0` | Token budget per minute. `0` disables window pacing. |
-| `PI_THROTTLE_BASE_COOLDOWN_MS` | `20000` | First backoff after a 429. |
-| `PI_THROTTLE_MAX_COOLDOWN_MS` | `300000` | Backoff ceiling and longest hold. |
-| `PI_THROTTLE_MAX_WAIT_MS` | `180000` | Longest single sleep before a request. |
+| `PI_THROTTLE_PROVIDERS` | `baseten` | Which providers to slow down. Use commas for more than one. |
+| `PI_THROTTLE_MIN_INTERVAL_MS` | `3000` | Shortest time between two requests, in milliseconds. |
+| `PI_THROTTLE_TPM` | `0` | Tokens allowed each minute. `0` turns this check off. |
+| `PI_THROTTLE_BASE_COOLDOWN_MS` | `20000` | First wait after a `429`, in milliseconds. |
+| `PI_THROTTLE_MAX_COOLDOWN_MS` | `300000` | Longest wait, in milliseconds. |
+| `PI_THROTTLE_MAX_WAIT_MS` | `180000` | Longest single pause before a request, in milliseconds. |
 
-For a 200k token context on a modest quota, start with a real budget:
+A good start for large contexts:
 
 ```bash
-export PI_THROTTLE_TPM=1000000     # one request of this size per minute
+export PI_THROTTLE_TPM=1000000
 export PI_THROTTLE_MIN_INTERVAL_MS=15000
 ```
 
-Tokens are estimated from the serialized payload at about four characters per token. It is a close guess, not the provider's own count, so leave headroom.
+That allows about one 200,000 token request each minute.
 
-## What it cannot fix
+The plugin guesses token counts at four characters per token. It is close, not exact. Leave some room under your real limit.
 
-Throttling controls when a request leaves, not how much capacity exists. If the account quota is genuinely too small for the work, or a dedicated deployment has no warm replica, requests will still fail. On the Baseten side these help:
+## Check that it works
 
-- `min_replicas` of at least 1 for interactive traffic, so scale-from-zero does not answer with 429 or 529.
-- `target_utilization` below 100 percent, so scaling starts before every slot is full.
-- A higher `max_replicas`, or a higher concurrency target, once benchmarks support it.
-- Async endpoints for batch work instead of synchronous bursts.
-
-Baseten returns 429 when a rate limit is exceeded or when no replica has room, and 529 when the queue passes its hard limit. A sustained 429 is a capacity or quota signal, not just a pacing signal.
-
-## Verify it is working
+Run one small request:
 
 ```bash
-PI_THROTTLE_MIN_INTERVAL_MS=2000 pi -p --model baseten/<your-model> "say ok"
+PI_THROTTLE_MIN_INTERVAL_MS=5000 pi -p --model baseten/<your-model> "say ok"
 ```
 
-The request should start later than it otherwise would, and a 429 should be followed by a wait rather than an immediate retry.
+You should see the request start later than usual. Then send a few requests in a row. Each one should wait its turn.
 
-## Design notes
+## If you still get `429` errors
 
-- The throttle lives in `before_provider_request`, which Pi awaits, so a delay there delays the actual send.
-- The 429 handling lives in `after_provider_response`, which sees the status and headers before the body is consumed.
-- State resets on Pi restart. Nothing is written to disk.
-- It only touches providers you name, so other providers keep their normal latency.
+The plugin controls when a request leaves. It cannot add capacity to your account.
+
+If errors continue, the limit itself is too small for your work. On Baseten you can:
+
+- Set `min_replicas` to at least 1 for live traffic. A sleeping model answers with `429` or `529`.
+- Set `target_utilization` below 100 percent. Then scaling starts before every slot is full.
+- Raise `max_replicas` after you test what one copy can handle.
+- Use async endpoints for batch jobs instead of bursts.
+
+Baseten sends `429` when you pass a rate limit or when no copy has room. It sends `529` when its queue is full. A steady stream of `429` means you need more capacity, not just slower sending.
+
+## For agents
+
+If you are an agent installing this for someone, do these steps in order:
+
+1. Run `pi list` and check that `git:github.com/nerveband/pi-provider-throttle` is not already there.
+2. Run `pi install git:github.com/nerveband/pi-provider-throttle`.
+3. Run `ls ~/.pi/agent/extensions/provider-throttle.ts`. If that file exists, move it away so the plugin does not load twice.
+4. Read the provider limit from the user or their provider dashboard.
+5. Set `PI_THROTTLE_TPM` to that number in the user's shell profile.
+6. Run the check command above and report the result.
+
+Do not edit `settings.json` to point at a tag or commit. An unpinned git install is what lets `pi update --extensions` move to new versions.
+
+## Updates
+
+```bash
+pi update --extensions
+```
+
+That pulls the newest version from GitHub. The settings stay as they are.
+
+## How it works
+
+- It checks before each request, then waits if needed. Pi waits with it, so the request really is delayed.
+- It reads the `429` status and its headers after the provider answers.
+- It keeps everything in memory. It writes nothing to disk and forgets all state when Pi restarts.
+- It only touches providers you list. Other providers keep their normal speed.
 
 ## License
 
