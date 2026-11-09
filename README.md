@@ -110,11 +110,23 @@ Do not edit `settings.json` to point at a tag or commit. An unpinned git install
 
 ## Updates
 
+Update by hand whenever you want:
+
 ```bash
 pi update --extensions
 ```
 
-That pulls the newest version from GitHub. The settings stay as they are.
+That pulls the newest version from GitHub. Your settings stay as they are.
+
+If you want this to happen on its own, install the optional daily job:
+
+```bash
+scripts/install-auto-update-macos.sh
+```
+
+It runs `pi update --extensions` once a day and writes to `~/Library/Logs/pi-extension-update.log`. Turn it off with `scripts/uninstall-auto-update-macos.sh`.
+
+Keep the install unpinned, meaning no tag and no commit hash in the source. A pinned install never moves to a newer version.
 
 ## How it works
 
