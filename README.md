@@ -23,9 +23,10 @@ So Pi was sending very large requests very fast. The provider said no, over and 
 ## What it does
 
 - It waits a minimum time between requests.
+- It sends one request at a time. After a pause, the waiting requests leave in a line, not all at once.
 - It counts the tokens it sent in the last minute. It waits if the next request would go over your limit.
 - When a `429` comes back, it stops sending for a while. It uses the wait time the provider asks for. If the provider gives none, it doubles its own wait time.
-- It turns off idle cache warming. That feature resends your whole context for no new answer, which wastes your limit.
+- It turns off cache warming for these providers. Warming resends your whole context for no new answer, which wastes your limit.
 - It shows `pacing …` or `rate limited: holding …` while it waits.
 
 It never changes your request. It only decides when the request leaves.
@@ -43,10 +44,10 @@ Then start Pi, or run `/reload` in a running session.
 To install from a copy on your disk instead:
 
 ```bash
-cp src/index.ts ~/.pi/agent/extensions/
+cp src/index.ts ~/.pi/agent/extensions/provider-throttle.ts
 ```
 
-Do not do both. Two copies means two waits on every request.
+Do not do both. Two copies means duplicate waits and duplicate warnings.
 
 ## Set your limit
 
@@ -68,19 +69,28 @@ export PI_THROTTLE_TPM=1000000
 export PI_THROTTLE_MIN_INTERVAL_MS=15000
 ```
 
-That allows about one 200,000 token request each minute.
+One million tokens each minute holds about five 200,000 token requests. The 15 second gap holds it nearer four.
+
+Environment variables only reach Pi if you start it from a shell that has them. To make this stick for every launch, write a config file instead:
+
+```bash
+mkdir -p ~/.pi/agent
+printf '%s\n' '{"tpm": 1000000, "minIntervalMs": 15000}' > ~/.pi/agent/provider-throttle.json
+```
+
+The file takes `providers`, `minIntervalMs`, `tpm`, `baseCooldownMs`, `maxCooldownMs` and `maxWaitMs`. Environment variables win over the file.
 
 The plugin guesses token counts at four characters per token. It is close, not exact. Leave some room under your real limit.
 
 ## Check that it works
 
-Run one small request:
+Pacing is easiest to see inside one interactive session, because each new `pi -p` process starts with an empty timer.
 
 ```bash
-PI_THROTTLE_MIN_INTERVAL_MS=5000 pi -p --model baseten/<your-model> "say ok"
+PI_THROTTLE_MIN_INTERVAL_MS=5000 pi
 ```
 
-You should see the request start later than usual. Then send a few requests in a row. Each one should wait its turn.
+Then send two prompts in a row. The second one should show `pacing …` before it runs. If you hit a limit, you should see `rate limited: holding …` and the next prompt waits instead of failing.
 
 ## If you still get `429` errors
 
@@ -121,18 +131,20 @@ That pulls the newest version from GitHub. Your settings stay as they are.
 If you want this to happen on its own, install the optional daily job:
 
 ```bash
-scripts/install-auto-update-macos.sh
+~/.pi/agent/git/github.com/nerveband/pi-provider-throttle/scripts/install-auto-update-macos.sh
 ```
 
-It runs `pi update --extensions` once a day and writes to `~/Library/Logs/pi-extension-update.log`. Turn it off with `scripts/uninstall-auto-update-macos.sh`.
+Run it from a logged-in desktop session. launchd cannot load a user job from a headless shell. The script writes absolute paths for node and Pi, because launchd does not read your shell profile.
+
+It updates this package only, once a day, and writes to `~/Library/Logs/pi-extension-update.log`. It does not touch your other packages. Turn it off with `scripts/uninstall-auto-update-macos.sh`.
 
 Keep the install unpinned, meaning no tag and no commit hash in the source. A pinned install never moves to a newer version.
 
 ## How it works
 
 - It checks before each request, then waits if needed. Pi waits with it, so the request really is delayed.
-- It reads the `429` status and its headers after the provider answers.
-- It keeps everything in memory. It writes nothing to disk and forgets all state when Pi restarts.
+- It looks for a `429` in two places: the HTTP response when the provider exposes it, and the request error that Baseten raises through the openai-completions path. Headers only arrive on the first path, so the second path uses doubling backoff.
+- It keeps everything in memory. It writes nothing except its optional config file, and it forgets all state when Pi restarts or reloads.
 - It only touches providers you list. Other providers keep their normal speed.
 
 ## License

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Removes the optional daily Pi package update job.
+# Removes the optional daily update job for this package.
 set -euo pipefail
 
 LABEL="io.github.nerveband.pi-extension-update"

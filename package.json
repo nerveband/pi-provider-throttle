@@ -4,10 +4,22 @@
   "description": "Paces Pi provider requests to stay inside token-per-minute limits and back off cleanly on HTTP 429.",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "pi", "rate-limit", "throttle", "baseten"],
-  "files": ["src", "README.md", "LICENSE"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "rate-limit",
+    "throttle",
+    "baseten"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -16,6 +28,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^20.16.10",
     "typescript": "^5.7.0"
   }
 }
