@@ -1,7 +1,7 @@
 {
   "name": "pi-provider-throttle",
-  "version": "0.1.0",
-  "description": "Paces Pi provider requests to stay inside token-per-minute limits and back off cleanly on HTTP 429.",
+  "version": "0.2.0",
+  "description": "Paces Pi provider requests to stay inside token and request limits by reading the provider's rate limit headers, and backs off cleanly on HTTP 429.",
   "type": "module",
   "license": "MIT",
   "keywords": [

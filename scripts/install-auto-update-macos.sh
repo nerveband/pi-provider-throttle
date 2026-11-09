@@ -25,8 +25,8 @@ PI_SCRIPT="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' 
 NODE_DIR="$(dirname "$NODE_BIN")"
 NODE_MAJOR="$("$NODE_BIN" -p 'process.versions.node.split(".")[0]')"
 
-if [[ "$NODE_MAJOR" -lt 20 ]]; then
-  echo "Node $NODE_MAJOR is too old. Pi needs Node 20 or newer." >&2
+if [[ "$NODE_MAJOR" -lt 22 ]]; then
+  echo "Node $NODE_MAJOR is too old. Pi needs Node 22.19 or newer." >&2
   exit 1
 fi
 
